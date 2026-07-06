@@ -25,6 +25,12 @@ resource "google_container_cluster" "main" {
     enabled = true
   }
 
+  # Not on by default even on Autopilot — required for the Gateway/HTTPRoute
+  # CRDs used in k8s/shortliner/05-gateway.yaml and 05-httproute.yaml.
+  gateway_api_config {
+    channel = "CHANNEL_STANDARD"
+  }
+
   # Workload Identity is enabled automatically on Autopilot clusters and
   # isn't configurable here — not set explicitly to avoid fighting that.
 }
