@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shortliner
+  namespace: shortliner
+  labels:
+    app: shortliner
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: shortliner
+  template:
+    metadata:
+      labels:
+        app: shortliner
+    spec:
+      serviceAccountName: shortliner
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: shortliner
+          # Patched by the promotion workflow — never rebuilt for prod.
+          image: ghcr.io/lukaszsiedlecki/shortliner:sha-0000000
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: false
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=75.0"
+            # Replace with `tofu output -raw cloudsql_private_ip_address` from opentofu/gke.
+            - name: DB_HOST
+              value: "REPLACE_WITH_CLOUDSQL_PRIVATE_IP"
+            - name: DB_NAME
+              value: "shortliner"
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: shortliner-db-secret
+                  key: SHORTLINER_DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shortliner-db-secret
+                  key: SHORTLINER_DB_PASSWORD
+            # KAFKA_BOOTSTRAP_SERVERS intentionally omitted — Kafka is dropped
+            # from prod for cost reasons. The producer is fire-and-forget and
+            # only logs a failure; the shorten/redirect path is unaffected.
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 60

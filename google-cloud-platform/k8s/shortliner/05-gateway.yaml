@@ -1,0 +1,20 @@
+# Static IP and cert map names are deterministic from opentofu/gke's
+# name_prefix ("shortliner") — confirm against `tofu output` if either
+# module's naming ever changes.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: shortliner-gateway
+  namespace: shortliner
+  annotations:
+    networking.gke.io/certmap: shortliner-cert-map
+spec:
+  gatewayClassName: gke-l7-global-external-managed
+  addresses:
+    - type: NamedAddress
+      value: shortliner-gateway-ip
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "shortliner.lukaszsiedlecki.com"

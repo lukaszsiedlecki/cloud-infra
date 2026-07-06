@@ -1,0 +1,92 @@
+name: Promote image to shortliner-prod
+
+# Triggered the same way as the homelab deploy, by a repository_dispatch
+# sent from each service's CI after it builds and pushes an image. Unlike
+# homelab, this targets a GitHub Environment ("production") that must have
+# required reviewers configured in repo settings — the job pauses for
+# manual approval before touching the live GKE cluster.
+on:
+  repository_dispatch:
+    types: [deploy-image]
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve deployment file for service
+        id: resolve
+        env:
+          SERVICE: ${{ github.event.client_payload.service }}
+        run: |
+          case "$SERVICE" in
+            shortliner)
+              echo "file=k8s/shortliner/03-deployment-shortliner.yaml" >> "$GITHUB_OUTPUT"
+              ;;
+            shortliner-analytics)
+              echo "file=k8s/shortliner/03-deployment-shortliner-analytics.yaml" >> "$GITHUB_OUTPUT"
+              ;;
+            shortliner-frontend)
+              echo "file=k8s/shortliner/03-deployment-shortliner-frontend.yaml" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown service: $SERVICE" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Patch image tag
+        env:
+          SERVICE: ${{ github.event.client_payload.service }}
+          TAG: ${{ github.event.client_payload.tag }}
+          FILE: ${{ steps.resolve.outputs.file }}
+        run: |
+          yq -i ".spec.template.spec.containers[0].image = \"ghcr.io/lukaszsiedlecki/${SERVICE}:${TAG}\"" "$FILE"
+
+      - name: Commit and push
+        id: commit
+        env:
+          SERVICE: ${{ github.event.client_payload.service }}
+          TAG: ${{ github.event.client_payload.tag }}
+          FILE: ${{ steps.resolve.outputs.file }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$FILE"
+          if git diff --cached --quiet; then
+            echo "No changes for $SERVICE at $TAG, nothing to commit"
+          else
+            git commit -m "chore: deploy ${SERVICE} ${TAG} to shortliner-prod"
+            git push
+          fi
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials shortliner-cluster \
+            --region europe-central2 \
+            --project shortliner-prod
+
+      - name: Apply to cluster
+        env:
+          FILE: ${{ steps.resolve.outputs.file }}
+        run: |
+          kubectl apply -f "$FILE"
+          kubectl -n shortliner rollout status deployment "${{ github.event.client_payload.service }}" --timeout=300s

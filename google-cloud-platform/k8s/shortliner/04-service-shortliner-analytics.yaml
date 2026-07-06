@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shortliner-analytics-svc
+  namespace: shortliner
+spec:
+  selector:
+    app: shortliner-analytics
+  ports:
+    - port: 8082
+      targetPort: 8082
