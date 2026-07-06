@@ -2,8 +2,7 @@
 
 Production infrastructure for `shortliner` in GCP, provisioned with OpenTofu.
 Runs alongside a homelab (Talos + ArgoCD) dev/UAT deployment of the same app,
-which is untouched by anything here. See `/home/lukasz/.claude/plans/delegated-cooking-llama.md`
-for the full design rationale and decisions.
+which is untouched by anything here.
 
 ## Layout
 
@@ -51,12 +50,14 @@ for the full design rationale and decisions.
 The Gateway/load balancer is intentionally left running at all times — GCP
 bills its forwarding rule a flat ~$18-20/month regardless of backend health,
 and tearing it down would mean re-issuing the managed TLS cert and
-re-propagating DNS on every wake (accepted tradeoff, see plan doc).
+re-propagating DNS on every wake, which isn't worth the fragility for the
+amount it would save.
 
 ## Known gaps / explicit non-goals (for now)
 
 - GitHub → GCP auth uses a long-lived SA JSON key, not Workload Identity
   Federation — migrate later.
-- No Kafka in prod (dropped for cost — see plan doc); only the optional
-  click-analytics pipeline is affected.
+- No Kafka in prod (dropped for cost — Google Managed Service for Apache
+  Kafka can't be paused, only deleted); only the optional click-analytics
+  pipeline is affected.
 - `shortliner-auth` is out of scope entirely.
