@@ -27,3 +27,9 @@ variable "db_tier" {
   type        = string
   default     = "db-custom-1-3840"
 }
+
+variable "cloudflare_zone" {
+  description = "Cloudflare zone (registered domain) that `domain` is a subdomain of"
+  type        = string
+  default     = "lukaszsiedlecki.com"
+}

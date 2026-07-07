@@ -8,6 +8,9 @@ provider "google-beta" {
   region  = var.region
 }
 
+# Reads the token from the CLOUDFLARE_API_TOKEN env var — never set it here.
+provider "cloudflare" {}
+
 data "google_project" "current" {
   project_id = var.project_id
 }
@@ -66,4 +69,15 @@ module "gateway" {
   name_prefix = var.name_prefix
   project_id  = var.project_id
   domain      = var.domain
+}
+
+module "dns" {
+  source = "./modules/dns"
+
+  zone_name         = var.cloudflare_zone
+  app_hostname      = var.domain
+  static_ip_address = module.gateway.static_ip_address
+
+  dns_authorization_record_name = module.gateway.dns_authorization_dns_resource_record[0].name
+  dns_authorization_record_data = module.gateway.dns_authorization_dns_resource_record[0].data
 }

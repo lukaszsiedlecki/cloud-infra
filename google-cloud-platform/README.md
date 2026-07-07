@@ -12,7 +12,9 @@ which is untouched by anything here.
 - `opentofu/gke/` — the main stack: VPC + Private Service Access, GKE
   Autopilot cluster, Cloud SQL (private IP, no backups), Secret Manager
   secrets + Workload Identity bindings, the GitHub Actions deployer service
-  account, and the Gateway API static IP + Certificate Manager cert.
+  account, the Gateway API static IP + Certificate Manager cert, and the
+  matching Cloudflare DNS records (both DNS-only/not proxied — see
+  `opentofu/gke/modules/dns`).
 - `k8s/shortliner/` — plain Kubernetes manifests (namespace, service
   accounts, SecretSync, Deployments/Services, Gateway/HTTPRoute) applied
   directly by the promotion workflow — no ArgoCD. All 3 app Deployments run
@@ -32,20 +34,23 @@ which is untouched by anything here.
 1. Create the `shortliner-prod` GCP project and link a billing account
    (manual, via console/gcloud — not managed by OpenTofu).
 2. `cd opentofu/bootstrap && tofu init && tofu apply` — creates the state bucket.
-3. `cd opentofu/gke && tofu init && tofu apply` — provisions everything else.
-   Before applying, add the DNS records from the `gateway_dns_authorization_record`
-   output (needed for the managed cert to validate) and later point
-   `shortliner.lukaszsiedlecki.com`'s A record at `gateway_static_ip_address`.
-4. Fill in the `REPLACE_WITH_CLOUDSQL_PRIVATE_IP` placeholders in
+3. Create a Cloudflare API token (DNS edit permission, scoped to the
+   `lukaszsiedlecki.com` zone) and `export CLOUDFLARE_API_TOKEN=...` —
+   `opentofu/gke` manages the domain's DNS records directly and needs this to
+   authenticate. Never commit the token or put it in a `.tf` file.
+4. `cd opentofu/gke && tofu init && tofu apply` — provisions everything,
+   including the DNS records needed for the managed cert to validate and for
+   `shortliner.lukaszsiedlecki.com` to resolve. No manual DNS step needed.
+5. Fill in the `REPLACE_WITH_CLOUDSQL_PRIVATE_IP` placeholders in
    `k8s/shortliner/03-deployment-*.yaml` with `tofu output -raw cloudsql_private_ip_address`.
-5. In the GitHub repo settings: create a `production` Environment with
+6. In the GitHub repo settings: create a `production` Environment with
    required reviewers, and add its `GCP_SA_KEY` secret from
    `tofu output -raw github_deployer_key_json_base64 | base64 -d`.
-6. Install the Strimzi operator and apply the Kafka cluster (see
+7. Install the Strimzi operator and apply the Kafka cluster (see
    `k8s/kafka/README.md`) — do this before the app Deployments if you want
    them to connect on first boot, though it isn't strictly required since
    the Kafka client usage is fire-and-forget/best-effort.
-7. Apply the k8s manifests once manually (`kubectl apply -f k8s/shortliner/`)
+8. Apply the k8s manifests once manually (`kubectl apply -f k8s/shortliner/`)
    to bootstrap the namespace/cluster objects, then let the promotion
    workflow take over for subsequent image updates.
 

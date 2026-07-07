@@ -12,13 +12,17 @@ output "cloudsql_private_ip_address" {
 }
 
 output "gateway_static_ip_address" {
-  description = "Point the DNS A record for the domain at this IP"
+  description = "The Gateway's IP — both DNS records below are managed automatically by the dns module, this is just for reference"
   value       = module.gateway.static_ip_address
 }
 
 output "gateway_dns_authorization_record" {
-  description = "Add this CNAME record at your DNS provider before the managed certificate can be issued"
+  description = "Reference only — the matching Cloudflare CNAME is created automatically by the dns module"
   value       = module.gateway.dns_authorization_dns_resource_record
+}
+
+output "dns_app_record_fqdn" {
+  value = module.dns.app_record_fqdn
 }
 
 output "gateway_certificate_map_name" {
