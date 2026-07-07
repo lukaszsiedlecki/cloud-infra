@@ -18,6 +18,15 @@ spec:
         app: shortliner-analytics
     spec:
       serviceAccountName: shortliner-analytics
+      # Spot Pods for cost savings — safe here since this is stateless and
+      # tolerates a restart on preemption.
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      tolerations:
+        - key: cloud.google.com/gke-spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -55,9 +64,8 @@ spec:
                 secretKeyRef:
                   name: shortliner-analytics-db-secret
                   key: ANALYTICS_DB_PASSWORD
-            # KAFKA_BOOTSTRAP_SERVERS intentionally omitted — Kafka is dropped
-            # from prod for cost reasons. This service just has nothing to
-            # consume; its DB-backed query endpoints still work.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
           resources:
             requests:
               cpu: 200m

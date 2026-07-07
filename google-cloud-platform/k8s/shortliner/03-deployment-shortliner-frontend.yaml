@@ -18,6 +18,15 @@ spec:
         app: shortliner-frontend
     spec:
       serviceAccountName: shortliner-frontend
+      # Spot Pods for cost savings — safe here since this is stateless and
+      # tolerates a restart on preemption.
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      tolerations:
+        - key: cloud.google.com/gke-spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
       securityContext:
         runAsNonRoot: true
         seccompProfile:
