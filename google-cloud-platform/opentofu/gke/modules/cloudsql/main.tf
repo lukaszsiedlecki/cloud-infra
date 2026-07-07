@@ -11,6 +11,11 @@ resource "google_sql_database_instance" "main" {
   }
 
   settings {
+    # Cloud SQL now defaults new instances to ENTERPRISE_PLUS, which only
+    # accepts its own db-perf-optimized-N-* tier family. Pin the classic
+    # edition explicitly so db-custom-* tiers (cheaper, right-sized for this
+    # project) are valid.
+    edition           = "ENTERPRISE"
     tier              = var.tier
     availability_type = "ZONAL"
     disk_autoresize   = true
