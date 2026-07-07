@@ -10,5 +10,6 @@ lives at repo root.
 
 - [`google-cloud-platform/`](google-cloud-platform/) — GCP infra for
   `shortliner-prod`, provisioned with OpenTofu (GKE Autopilot, Cloud SQL,
-  Secret Manager, Gateway API) plus the Kubernetes manifests and promotion
-  workflow that deploy to it. See its README for setup and day-to-day usage.
+  Secret Manager, Cloudflare Tunnel) plus the Kubernetes manifests and
+  promotion workflow that deploy to it. See its README for setup and
+  day-to-day usage.

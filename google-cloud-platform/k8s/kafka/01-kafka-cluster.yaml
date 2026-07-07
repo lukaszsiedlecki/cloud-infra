@@ -6,7 +6,12 @@ metadata:
   labels:
     strimzi.io/cluster: my-cluster
 spec:
-  replicas: 2
+  # Single broker — a pet project with no real traffic doesn't justify
+  # doubling the compute/storage footprint for quorum resilience, consistent
+  # with every other cost-over-resilience call made in this environment
+  # (no backups, no HA, spot everywhere). No podAntiAffinity needed with
+  # only one replica.
+  replicas: 1
   roles:
     - controller
     - broker
@@ -38,12 +43,6 @@ spec:
                     operator: In
                     values:
                       - "true"
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  strimzi.io/cluster: my-cluster
-              topologyKey: kubernetes.io/hostname
       tolerations:
         - key: cloud.google.com/gke-spot
           operator: Equal
@@ -70,10 +69,12 @@ spec:
         type: internal
         tls: false
     config:
-      offsets.topic.replication.factor: 2
-      transaction.state.log.replication.factor: 2
+      # Replication factor 1 — only one broker exists, so anything higher
+      # would prevent topic creation entirely.
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
       transaction.state.log.min.isr: 1
-      default.replication.factor: 2
+      default.replication.factor: 1
       min.insync.replicas: 1
   entityOperator:
     topicOperator: {}

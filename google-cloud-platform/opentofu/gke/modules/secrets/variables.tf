@@ -36,3 +36,9 @@ variable "shortliner_analytics_db_password" {
   type      = string
   sensitive = true
 }
+
+variable "tunnel_token" {
+  description = "Cloudflare Tunnel token, consumed by the cloudflared Deployment"
+  type        = string
+  sensitive   = true
+}

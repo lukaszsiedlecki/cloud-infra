@@ -11,28 +11,13 @@ output "cloudsql_private_ip_address" {
   value       = module.cloudsql.private_ip_address
 }
 
-output "gateway_static_ip_address" {
-  description = "The Gateway's IP — both DNS records below are managed automatically by the dns module, this is just for reference"
-  value       = module.gateway.static_ip_address
-}
-
-output "gateway_dns_authorization_record" {
-  description = "Reference only — the matching Cloudflare CNAME is created automatically by the dns module"
-  value       = module.gateway.dns_authorization_dns_resource_record
-}
-
 output "dns_app_record_fqdn" {
-  value = module.dns.app_record_fqdn
+  description = "The proxied Cloudflare CNAME routing traffic into the tunnel — created automatically, no manual DNS step needed"
+  value       = module.dns.app_record_fqdn
 }
 
-output "gateway_certificate_map_name" {
-  description = "Used in the Gateway manifest's networking.gke.io/certmap annotation"
-  value       = module.gateway.certificate_map_name
-}
-
-output "gateway_static_ip_name" {
-  description = "Used in the Gateway manifest's spec.addresses[0].value"
-  value       = module.gateway.static_ip_name
+output "tunnel_id" {
+  value = module.tunnel.tunnel_id
 }
 
 output "github_deployer_email" {

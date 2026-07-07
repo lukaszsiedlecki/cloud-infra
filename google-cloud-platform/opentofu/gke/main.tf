@@ -15,6 +15,16 @@ data "google_project" "current" {
   project_id = var.project_id
 }
 
+# Looked up once here (not inside the dns/tunnel modules) since both need
+# it and each depends on an output of the other (dns needs the tunnel_id,
+# tunnel needs the account_id) — doing the lookup in either module would
+# create a circular module dependency.
+data "cloudflare_zone" "main" {
+  filter = {
+    name = var.cloudflare_zone
+  }
+}
+
 module "network" {
   source = "./modules/network"
 
@@ -50,6 +60,23 @@ module "iam" {
   project_id  = var.project_id
 }
 
+module "tunnel" {
+  source = "./modules/tunnel"
+
+  account_id     = data.cloudflare_zone.main.account.id
+  tunnel_name    = var.name_prefix
+  app_hostname   = var.domain
+  origin_service = "shortliner-frontend-svc:80"
+}
+
+module "dns" {
+  source = "./modules/dns"
+
+  zone_id      = data.cloudflare_zone.main.id
+  app_hostname = var.domain
+  tunnel_id    = module.tunnel.tunnel_id
+}
+
 module "secrets" {
   source = "./modules/secrets"
 
@@ -61,23 +88,5 @@ module "secrets" {
   shortliner_db_password           = module.cloudsql.shortliner_db_password
   shortliner_analytics_db_user     = module.cloudsql.shortliner_analytics_db_user
   shortliner_analytics_db_password = module.cloudsql.shortliner_analytics_db_password
-}
-
-module "gateway" {
-  source = "./modules/gateway"
-
-  name_prefix = var.name_prefix
-  project_id  = var.project_id
-  domain      = var.domain
-}
-
-module "dns" {
-  source = "./modules/dns"
-
-  zone_name         = var.cloudflare_zone
-  app_hostname      = var.domain
-  static_ip_address = module.gateway.static_ip_address
-
-  dns_authorization_record_name = module.gateway.dns_authorization_dns_resource_record[0].name
-  dns_authorization_record_data = module.gateway.dns_authorization_dns_resource_record[0].data
+  tunnel_token                     = module.tunnel.tunnel_token
 }

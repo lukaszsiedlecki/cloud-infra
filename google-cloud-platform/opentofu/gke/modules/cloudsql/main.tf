@@ -19,6 +19,9 @@ resource "google_sql_database_instance" "main" {
     tier              = var.tier
     availability_type = "ZONAL"
     disk_autoresize   = true
+    # HDD, not the SSD default — plenty for a low-traffic learning DB with
+    # no real IOPS demand, and ~45% cheaper per GB.
+    disk_type = "PD_HDD"
 
     backup_configuration {
       enabled = false

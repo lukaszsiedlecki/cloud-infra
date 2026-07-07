@@ -1,5 +1,5 @@
-variable "zone_name" {
-  description = "Cloudflare zone (registered domain), e.g. lukaszsiedlecki.com"
+variable "zone_id" {
+  description = "Cloudflare zone ID (looked up once at root level and shared with the tunnel module, to avoid a circular module dependency)"
   type        = string
 }
 
@@ -8,17 +8,7 @@ variable "app_hostname" {
   type        = string
 }
 
-variable "static_ip_address" {
-  description = "Gateway's reserved static IP — the A record's target"
-  type        = string
-}
-
-variable "dns_authorization_record_name" {
-  description = "Certificate Manager DNS authorization record name (from the gateway module)"
-  type        = string
-}
-
-variable "dns_authorization_record_data" {
-  description = "Certificate Manager DNS authorization record data/target (from the gateway module)"
+variable "tunnel_id" {
+  description = "Cloudflare Tunnel ID (from the tunnel module) — the CNAME target is {tunnel_id}.cfargotunnel.com"
   type        = string
 }

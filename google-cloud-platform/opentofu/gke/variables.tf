@@ -17,7 +17,7 @@ variable "name_prefix" {
 }
 
 variable "domain" {
-  description = "Domain the Gateway serves"
+  description = "Domain the app is served on, routed via Cloudflare Tunnel"
   type        = string
   default     = "shortliner.lukaszsiedlecki.com"
 }
