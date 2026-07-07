@@ -35,6 +35,27 @@ resource "google_container_cluster" "main" {
     enabled = true
   }
 
+  # Autopilot enables these three by default even though nothing in this
+  # project uses Filestore, GCS Fuse, or Parallelstore volumes — each one
+  # runs a DaemonSet pod (with several sidecar containers) on every single
+  # node, adding up to ~240Mi of memory reservation per node for storage
+  # backends we never touch. Google warns against disabling these only if
+  # you have PVs backed by them; we don't, so it's safe here. Found while
+  # debugging a node running at 96% memory with no room for one more pod.
+  addons_config {
+    gcp_filestore_csi_driver_config {
+      enabled = false
+    }
+
+    gcs_fuse_csi_driver_config {
+      enabled = false
+    }
+
+    parallelstore_csi_driver_config {
+      enabled = false
+    }
+  }
+
   # Workload Identity is enabled automatically on Autopilot clusters and
   # isn't configurable here — not set explicitly to avoid fighting that.
 }
