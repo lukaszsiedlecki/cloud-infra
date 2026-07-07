@@ -23,9 +23,9 @@ variable "domain" {
 }
 
 variable "db_tier" {
-  description = "Cloud SQL machine tier"
+  description = "Cloud SQL machine tier. db-f1-micro (shared-core, 614 MiB RAM) is the cheapest option that supports PostgreSQL, chosen for this low-traffic learning project — resize up (e.g. db-g1-small or a db-custom-* tier) if memory pressure becomes a real problem."
   type        = string
-  default     = "db-custom-1-3840"
+  default     = "db-f1-micro"
 }
 
 variable "cloudflare_zone" {

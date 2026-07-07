@@ -14,9 +14,9 @@ variable "region" {
 }
 
 variable "tier" {
-  description = "Machine tier. Shared-core tiers (e.g. db-f1-micro) have conflicting support signals for Postgres — verify with a real apply before downsizing from this default."
+  description = "Machine tier. db-f1-micro (shared-core) is confirmed to work for PostgreSQL and is the cheapest available option — verified against the real project/region, not just docs."
   type        = string
-  default     = "db-custom-1-3840"
+  default     = "db-f1-micro"
 }
 
 variable "network_id" {
