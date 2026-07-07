@@ -18,9 +18,19 @@ resource "google_container_cluster" "main" {
   # precious enough to need it.
   deletion_protection = false
 
-  # Lets pods sync Secret Manager values into a real k8s Secret via
-  # SecretProviderClass/SecretSync, keeping the existing secretKeyRef-based
-  # env var wiring in the apps unchanged.
+  # Enables the Secret Manager CSI driver component only (the
+  # SecretProviderClass side). This is NOT the same as GKE's separate
+  # "Secret Sync" feature (the SecretSync CRD that actually materializes a
+  # real k8s Secret, which k8s/shortliner/02-secretsync.yaml depends on) —
+  # that's controlled by a distinct `secret_sync_config` block that only
+  # exists starting in provider version 7.x (ours is pinned to ~> 6.0, see
+  # versions.tf). Until that provider upgrade is done deliberately (a major
+  # version bump, not something to rush mid-deployment), Secret Sync is
+  # enabled out-of-band via:
+  #   gcloud container clusters update shortliner-cluster \
+  #     --region europe-central2 --project shortliner-prod --enable-secret-sync
+  # This is real IaC drift — the cluster has a setting Terraform doesn't
+  # know about — tracked deliberately here until the provider bump happens.
   secret_manager_config {
     enabled = true
   }
