@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Scales all shortliner Deployments and the Kafka node pool to 0 (near-zero
-# Autopilot compute cost) and stops the Cloud SQL instance (stops compute
-# billing, keeps storage). The Gateway/load balancer is deliberately left
-# running: GCP bills its forwarding rule a flat fee regardless of backend
-# health, and tearing it down would mean re-issuing the managed TLS cert and
-# re-propagating DNS on every wake — not worth the fragility.
+# Scales all shortliner Deployments (including cloudflared) and the Kafka
+# node pool to 0 (near-zero Autopilot compute cost) and stops the Cloud SQL
+# instance (stops compute billing, keeps storage). Unlike the old GCP
+# Gateway setup, there's no load balancer/forwarding-rule floor cost to
+# worry about leaving up — Cloudflare Tunnel has no equivalent standing
+# charge, so scaling cloudflared to 0 along with everything else is fine.
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-shortliner-prod}"
@@ -26,4 +26,4 @@ gcloud sql instances patch "${CLOUDSQL_INSTANCE}" \
   --activation-policy=NEVER \
   --quiet
 
-echo "Asleep. Gateway/load balancer stays up (fixed forwarding-rule cost — see google-cloud-platform/README.md)."
+echo "Asleep. cloudflared is also scaled to 0, so the site is unreachable until wake.sh runs — no fixed cost was left running either way."
