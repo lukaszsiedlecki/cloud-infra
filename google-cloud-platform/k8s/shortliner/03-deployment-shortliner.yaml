@@ -37,7 +37,7 @@ spec:
       containers:
         - name: shortliner
           # Patched by the promotion workflow — never rebuilt for prod.
-          image: ghcr.io/lukaszsiedlecki/shortliner:sha-0000000
+          image: ghcr.io/lukaszsiedlecki/shortliner:sha-5231772
           ports:
             - containerPort: 8080
           securityContext:
@@ -49,9 +49,8 @@ spec:
           env:
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0"
-            # Replace with `tofu output -raw cloudsql_private_ip_address` from opentofu/gke.
             - name: DB_HOST
-              value: "REPLACE_WITH_CLOUDSQL_PRIVATE_IP"
+              value: "10.80.0.3"
             - name: DB_NAME
               value: "shortliner"
             - name: DB_USERNAME

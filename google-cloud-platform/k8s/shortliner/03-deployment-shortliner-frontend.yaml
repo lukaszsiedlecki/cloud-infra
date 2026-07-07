@@ -37,7 +37,7 @@ spec:
       containers:
         - name: shortliner-frontend
           # Patched by the promotion workflow — never rebuilt for prod.
-          image: ghcr.io/lukaszsiedlecki/shortliner-frontend:sha-0000000
+          image: ghcr.io/lukaszsiedlecki/shortliner-frontend:sha-d50bd05
           ports:
             - containerPort: 3000
           securityContext:
