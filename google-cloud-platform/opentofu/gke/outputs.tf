@@ -7,7 +7,7 @@ output "cloudsql_instance_name" {
 }
 
 output "cloudsql_private_ip_address" {
-  description = "Set as DB_HOST in the k8s Deployment manifests"
+  description = "Also flows automatically into DB_HOST via modules/secrets -> Secret Sync — this output is just for manual inspection"
   value       = module.cloudsql.private_ip_address
 }
 
@@ -21,13 +21,8 @@ output "tunnel_id" {
 }
 
 output "github_deployer_email" {
-  value = module.iam.deployer_email
-}
-
-output "github_deployer_key_json_base64" {
-  description = "Run: tofu output -raw github_deployer_key_json_base64 | base64 -d > key.json — then paste key.json's contents into the GCP_SA_KEY GitHub secret, and delete the local file. Never commit it."
-  value       = module.iam.deployer_key_json_base64
-  sensitive   = true
+  description = "Set as the GH_DEPLOYER_SA_EMAIL repo variable in each app repo — impersonated via WIF, no key involved"
+  value       = module.iam.deployer_email
 }
 
 output "secret_manager_secret_ids" {
