@@ -6,37 +6,31 @@ Full narrative history and design rationale (much more verbose than this file) l
 
 ## Current live state (as of 2026-07-09, end of session)
 
-Everything below is **actually deployed and verified working** unless noted otherwise. The entire stack was destroyed and rebuilt from scratch this session (moving off Autopilot — see Architecture below), so private IPs, secret versions, etc. are new since the previous session.
+Everything below is **actually deployed and verified working** unless noted otherwise.
 
 - GKE **Standard** cluster `shortliner-cluster`, **zonal** in `europe-central2-a`, single-node pool `shortliner-primary-pool` (`e2-standard-2`, Spot, 30GB `pd-balanced`).
-- Cloud SQL `shortliner-pg` (`db-f1-micro`, `PD_HDD`, private IP `10.158.0.3`) running with 2 databases. The IP **will still change on any future destroy/recreate**, but `DB_HOST` now flows through Terraform → Secret Manager → Secret Sync (fixed this session, see gotcha below) — no more manual manifest edits needed after a rebuild, just a fresh `tofu apply`.
+- Cloud SQL `shortliner-pg` (`db-f1-micro`, `PD_HDD`) running with 2 databases. `DB_HOST` flows through Terraform → Secret Manager → Secret Sync automatically — no manual manifest edits needed after any future rebuild.
 - Kafka (Strimzi 1.1.0, single broker) running in `kafka` namespace.
-- App pods in `shortliner` namespace — **all Running**, including `shortliner-analytics` (previously stuck at 0 replicas on Autopilot due to node-capacity crunch; the Standard-mode migration fixed this as a side effect):
-  - `shortliner`, `shortliner-frontend`, `shortliner-analytics`, `cloudflared` — all **Running**.
+- App pods in `shortliner` namespace — **all Running**: `shortliner`, `shortliner-analytics`, `shortliner-frontend`, `cloudflared`.
 - `https://shortliner.lukaszsiedlecki.com` resolves and serves the frontend through the Cloudflare Tunnel — verified with `curl -I`, got `HTTP/2 200`.
-- Sleep/wake **verified end-to-end this session**, including the real GKE node pool resize (not just pod-level idling — confirmed `gcloud compute instances list` shows 0 instances while asleep).
-- GitHub side fully wired: `production` environment exists on `cloud-infra` with `lukaszsiedlecki` as required reviewer, `GCP_SA_KEY` secret set, and all 3 service repos (`shortliner`, `shortliner-analytics`, `shortliner-frontend`) have `CLOUD_INFRA_DISPATCH_TOKEN` set and dispatch to `cloud-infra` on push to `master`.
-- A temporary `tofu-bootstrap` GCP service account (Owner role) and key at `~/tofu-bootstrap-key.json` are **still in use** — needed because normal `gcloud auth application-default login` is broken for this account (see gotchas). **Do not delete this until the user confirms they're done with active infra changes** — it's the only way `tofu`/`gcloud` commands in this project currently authenticate.
-- All Terraform providers upgraded to latest this session: `hashicorp/google`/`google-beta` `~> 7.0` (was `~> 6.0`), `cloudflare/cloudflare` `~> 5.0` (patch-latest 5.21.1), `hashicorp/random` `~> 3.6` (patch-latest 3.9.0). The 7.x bump is what unlocked declaring `secret_sync_config` in Terraform (see Architecture).
+- Sleep/wake verified end-to-end, including the real GKE node pool resize (not just pod-level idling).
+- **CI/CD fully rebuilt this session — see "CI/CD architecture" below.** All 3 app repos (`shortliner`, `shortliner-analytics`, `shortliner-frontend`) now build, tag, and deploy themselves directly to `shortliner-prod` via GitHub OIDC → GCP Workload Identity Federation, verified live end-to-end (real image builds, real gated deploys, real rollouts, confirmed via `kubectl` and the live site). `cloud-infra` itself has its own `infra.yml` pipeline for `tofu plan`/`apply`/`destroy`, also WIF-based, also verified live (a real `apply` ran cleanly behind approval; the `destroy` path was verified to reach its approval gate correctly and was deliberately rejected, never executed).
+- **No long-lived GCP credentials remain in any GitHub repo.** `GCP_SA_KEY` (env-scoped secret on `cloud-infra`'s `production` environment) and the underlying `google_service_account_key.github_deployer` Terraform resource are both deleted. The `tofu-bootstrap` SA + local key at `~/tofu-bootstrap-key.json` still exists as a **manual human fallback only** (ADC login is still broken for this account, see gotchas) — it's no longer the primary path for anything, CI handles routine work now.
+- All Terraform providers on latest as of last check: `hashicorp/google`/`google-beta` `~> 7.0` (7.39.0), `cloudflare/cloudflare` `~> 5.0` (5.21.1), `hashicorp/random` `~> 3.6` (3.9.0).
 
-## Architecture (locked-in decisions — don't re-litigate without new info)
+## CI/CD architecture (new this session — replaces the old promote.yml design entirely)
 
-- **GKE Standard**, zonal in `europe-central2-a` (Warsaw region, chosen for latency — user is Poland-based). Switched from Autopilot this session purely for cost: Autopilot forced ~3-4 nodes minimum (mandatory system-only nodes kept separate from workload nodes) with a fixed, non-configurable 100GiB boot disk each, wildly oversized for this workload. Zonal (not regional) specifically to qualify for GKE's free-tier zonal control plane (one free zonal cluster per billing account) vs. ~$73/mo flat for a regional control plane.
-  - Single fixed-size node pool (`shortliner-primary-pool`, 1 node, **not** autoscaled — sleep.sh/wake.sh explicitly resize it 0↔1 via `gcloud container clusters resize`, and `lifecycle.ignore_changes = [node_count]` in Terraform keeps `tofu apply` from fighting that).
-  - Machine type is `e2-standard-2` (dedicated, non-shared-core, ~1930m allocatable CPU) — **`e2-medium` was tried first and does not work**: its "2 vCPU" is shared-core/burstable, and GKE's allocatable-CPU calculation trims it to ~940m, of which GKE's own mandatory system pods (kube-dns, kube-proxy, csi-secrets-store, gke-metadata-server, fluentbit, konnectivity, netd, node-local-dns) already consume ~930m by themselves — leaving no room for any app workload. Confirmed live (every pod stuck `Pending` on "Insufficient cpu") before switching to `e2-standard-2`.
-  - Google Managed Prometheus (the default-on `kube-state-metrics` + `gmp-operator`/`collector` trio, ~110m CPU) is explicitly disabled via `monitoring_config { managed_prometheus { enabled = false } }` — nobody's using it for this project, and every millicore matters on a single small node. `SYSTEM_COMPONENTS` logging/monitoring stays on (cheap, useful).
-  - Standard mode is VPC-native and needs explicit secondary IP ranges for pods/services (`modules/network`: `10.20.0.0/21` pods, `10.30.0.0/24` services) and an explicit `workload_identity_config` block on the cluster (automatic under Autopilot, not under Standard) — `modules/secrets`' IAM bindings depend on this actually being present.
-  - `http_load_balancing` addon explicitly disabled — Standard enables the GLBC ingress controller by default; this project has zero `Ingress` objects (Cloudflare Tunnel only), so it's dead weight on the one small node.
-- **Cloud SQL Postgres**: `db-f1-micro` (cheapest tier confirmed to work for Postgres), `PD_HDD` (not SSD default), private-IP-only, no backups, `edition = "ENTERPRISE"` set explicitly.
-- **Kafka**: self-hosted via Strimzi operator, **single combined controller+broker node** (not homelab's 2-node dual-role pool — cost/simplicity call for a project with no real traffic), KRaft mode, internal-only (no external LoadBalancer). Operator installed manually via Helm, out-of-band (matches homelab convention) — only the `Kafka`/`KafkaNodePool` CRs live in git.
-- **Ingress: Cloudflare Tunnel**, not GCP Gateway API/Load Balancer. This was a deliberate reversal — the original Gateway API + Certificate Manager design cost a flat ~$18-20/month regardless of traffic (the single biggest recurring cost in the whole stack). `cloudflared` runs as a Deployment, makes an outbound-only connection to Cloudflare's edge. **No GCP load balancer or public IP exists in this project at all.** TLS terminates at Cloudflare.
-- **DNS**: Cloudflare, managed via Terraform (`cloudflare` provider), not Google Cloud DNS.
-- **Secrets**: Google Secret Manager, synced into real k8s Secrets via GKE's Secret Sync feature. **Now fully Terraform-managed** — `secret_sync_config { enabled = true }` is declared directly on the cluster resource (needed the 7.x provider bump this session; previously this was undeclared out-of-band `gcloud` drift, now closed). `DB_HOST` (Cloud SQL's private IP) is synced the same way as the DB credentials as of this session — `modules/secrets` sources it straight from `module.cloudsql.private_ip_address`, so it's no longer a hardcoded literal in the Deployment manifests.
-- **Spot VMs**: the node pool runs on Spot pricing (`spot = true` in `modules/gke`), and every app Deployment + the Strimzi `KafkaNodePool` already carries the `cloud.google.com/gke-spot` nodeSelector/toleration — this required zero k8s manifest changes when moving off Autopilot, since GKE applies that label/taint to any Spot node pool automatically, Autopilot or Standard.
-- **No ArgoCD**: GitHub Actions promotion (`repository_dispatch` → `cloud-infra`'s `promote.yml`) patches image tags via `yq` and applies directly with `kubectl`, gated behind a `production` GitHub Environment requiring manual approval.
-- **GitHub→GCP auth**: long-lived SA JSON key (`GCP_SA_KEY` secret) — Workload Identity Federation is an explicit, deliberately-deferred future step.
-- **Sleep/wake cost control**: `k8s/scripts/sleep.sh`/`wake.sh` scale app Deployments + Kafka node pool to 0, stop Cloud SQL, **and now also resize the real GKE node pool to 0** (new this session — Standard mode has real billable VMs, unlike Autopilot). No load-balancer floor cost to worry about (Cloudflare Tunnel has none).
-- `shortliner-auth` is fully out of scope (disabled in homelab too, not ready).
+**App repos own their own deploy.** Each of `shortliner`, `shortliner-analytics`, `shortliner-frontend` has its own `k8s/deployment.yaml` + `k8s/service.yaml` (moved out of this repo — they're app-specific, not infra) and its own `deploy` job in `.github/workflows/deploy.yml`: build+push image to GHCR → patch the image tag into its own `k8s/deployment.yaml` via `yq`, commit the bump back to its own repo (audit trail) → authenticate to GCP via WIF (`google-github-actions/auth@v2`, no key) → `kubectl apply` + rollout-status check. Gated behind that repo's own `production` GitHub Environment (same required reviewer, `lukaszsiedlecki`). The old `repository_dispatch` → `cloud-infra`'s `promote.yml` flow is **completely gone** — `promote.yml` is deleted, has zero remaining callers. Each app repo's separate `notify-homelab` job (dispatches to the unrelated `lukaszsiedlecki/homelab` repo) was **left completely untouched** throughout this whole redesign — different secret (`HOMELAB_DISPATCH_PAT`), different target, not in scope.
+
+**cloud-infra owns its own infra pipeline.** `.github/workflows/infra.yml` (at the real repo root — see gotcha below) has 4 jobs:
+- `plan` — runs on every PR touching `opentofu/gke/**`, no approval gate, guarded against fork PRs (repo is public).
+- `apply` — runs on push to `main` (same path filter), gated behind the `production` environment.
+- `verify-confirmation` — `workflow_dispatch`-only, validates a typed `confirm` input (`destroy-shortliner-prod`) *before* any approval is requested, so a typo fails in seconds with zero reviewer noise.
+- `destroy` — `needs: verify-confirmation`, gated behind a **separate** `infra-destroy` environment (deliberately not the same gate as `apply`, so a reviewer can't habit-click through a destroy thinking it's a routine apply).
+
+**Auth**: one shared `google_iam_workload_identity_pool` + `_provider` (`modules/iam`, resource id `shortliner-github-actions`) federates GitHub's OIDC tokens. Two identities hang off it: `shortliner-gh-deployer` (existing SA, `roles/container.developer` only, impersonable by all 3 app repos via `attribute.repository`-scoped bindings) for app deploys, and a new `shortliner-infra-ci` SA (`roles/owner`, scoped to the project, impersonable only by `cloud-infra`) for the infra pipeline — deliberately broad-but-scoped rather than hand-crafted least-privilege, matching what `tofu-bootstrap` already did locally; the real security boundary is WIF (keyless, repo-scoped, no token to leak) plus the required-reviewer gates, not IAM minimization. **This is a completely separate WIF pool from the GKE cluster's own `workload_identity_config`** (used for in-cluster KSA→Secret Manager access, see `modules/gke`/`modules/secrets`) — don't conflate the two.
+
+Repo variables set (not secrets — none of these values are sensitive): `WIF_PROVIDER` and `INFRA_CI_SA_EMAIL` on `cloud-infra`; `WIF_PROVIDER` and `GH_DEPLOYER_SA_EMAIL` on each of the 3 app repos.
 
 ## Repo layout
 
@@ -45,17 +39,24 @@ opentofu/
   bootstrap/        # one-time, local-state, creates the GCS state bucket. Never touch during normal work.
   gke/              # the main stack — see modules/ for network, gke, cloudsql, iam, secrets, dns, tunnel
 k8s/
-  shortliner/       # namespace, KSAs, SecretSync, app Deployments/Services, cloudflared
+  shortliner/       # PLATFORM-LEVEL ONLY: namespace, KSAs, SecretSync, cloudflared.
+                     # App Deployments/Services live in each app's own repo now (k8s/deployment.yaml,
+                     # k8s/service.yaml in shortliner / shortliner-analytics / shortliner-frontend).
   kafka/            # Strimzi KafkaNodePool + Kafka CRs (operator itself installed manually, see k8s/kafka/README.md)
   scripts/          # sleep.sh / wake.sh
-.github/workflows/promote.yml   # repository_dispatch listener, patches image tag, kubectl applies
 ```
 
-(`modules/gke-autopilot/` was renamed to `modules/gke/` this session — the old name baked a mode choice into the module name that's now wrong; matches the naming convention of every other module.)
+Root-level (`cloud-infra/`, not `google-cloud-platform/`):
+```
+.github/workflows/infra.yml   # OpenTofu plan/apply/destroy pipeline for this directory's stack
+```
+**GitHub Actions workflow files must live at the actual repo root `.github/workflows/`** — this is a hard GitHub platform constraint (GitHub never discovers workflows in a nested subdirectory), overriding the root CLAUDE.md's general "no provider-specific config at root" convention. See that file and gotcha below for the full story.
+
+(`modules/gke-autopilot/` was renamed to `modules/gke/` in an earlier session — matches the naming convention of every other module, no mode baked into the name.)
 
 ## Operational gotchas (real issues hit and fixed — don't rediscover these)
 
-1. **ADC login is broken for this GCP account.** `gcloud auth application-default login` (incl. `--no-browser`) repeatedly drops the `cloud-platform`/`sqlservice.login` scopes during consent. Workaround in active use: the `tofu-bootstrap` SA key described above. Always `export GOOGLE_APPLICATION_CREDENTIALS=~/tofu-bootstrap-key.json` before running `tofu` or `gcloud` commands for this project.
+1. **ADC login is broken for this GCP account.** `gcloud auth application-default login` (incl. `--no-browser`) repeatedly drops the `cloud-platform`/`sqlservice.login` scopes during consent. Workaround: the `tofu-bootstrap` SA key, now used only as a manual fallback (CI handles routine `tofu`/deploy work via WIF). Always `export GOOGLE_APPLICATION_CREDENTIALS=~/tofu-bootstrap-key.json` before running `tofu` or `gcloud` commands locally for this project.
 
 2. **`google_service_networking_connection` has flaky provider polling on create**, not a real auth issue. Fails with a gRPC UNAUTHENTICATED-looking error while *waiting* for the operation (confirmed: the same call via plain `gcloud services vpc-peerings connect` succeeds immediately). Fix when it recurs:
    ```bash
@@ -64,63 +65,77 @@ k8s/
    tofu import 'module.network.google_service_networking_connection.private_service_access' \
      "projects/shortliner-prod/global/networks/shortliner-vpc:servicenetworking.googleapis.com"
    ```
-   **The same resource can also get stuck on *delete*** (`tofu destroy`), with error `FLOW_SN_DC_RESOURCE_PREVENTING_DELETE_CONNECTION` / "Producer services are still using this connection" — this is a [known terraform-provider-google v5+ regression](https://github.com/hashicorp/terraform-provider-google/issues/16275) where the provider's `deleteConnection` API call can hang indefinitely even after Cloud SQL is fully deleted (confirmed: waited over an hour across retries, still stuck). Fix: `gcloud compute networks peerings delete servicenetworking-googleapis-com --network=<vpc> --project=<project>` — the older Compute Engine peering API path deletes it cleanly in seconds where the Service Networking API path hangs. Then re-run `tofu destroy` to clean up the remaining network/address resources (it'll detect the drift and proceed).
+   **The same resource can also get stuck on *delete*** (`tofu destroy`), with error `FLOW_SN_DC_RESOURCE_PREVENTING_DELETE_CONNECTION` — a [known terraform-provider-google v5+ regression](https://github.com/hashicorp/terraform-provider-google/issues/16275). Fix: `gcloud compute networks peerings delete servicenetworking-googleapis-com --network=<vpc> --project=<project>` (the older Compute Engine peering API path deletes cleanly where the Service Networking path hangs), then re-run `tofu destroy`.
 
-3. **Cloud SQL now defaults to ENTERPRISE_PLUS edition**, which rejects `db-custom-*`/shared-core tiers. Already fixed in code (`edition = "ENTERPRISE"` in `modules/cloudsql/main.tf`) — just know why it's there if you see it.
+3. **Cloud SQL now defaults to ENTERPRISE_PLUS edition**, which rejects `db-custom-*`/shared-core tiers. Fixed in code (`edition = "ENTERPRISE"` in `modules/cloudsql/main.tf`).
 
-4. **Strimzi API version**: the deployed operator (1.1.0) serves `kafka.strimzi.io/v1`, not `v1beta2`, and `storage.volumes[].storageClass` is renamed to `.class` in v1. Already fixed in `k8s/kafka/01-kafka-cluster.yaml`. Always verify Strimzi manifests with `kubectl apply --dry-run=server` before trusting them, especially after any operator upgrade.
+4. **Strimzi API version**: the deployed operator (1.1.0) serves `kafka.strimzi.io/v1`, not `v1beta2`, and `storage.volumes[].storageClass` is renamed to `.class` in v1. Always verify Strimzi manifests with `kubectl apply --dry-run=server` before trusting them.
 
-5. **GKE Standard's mandatory system-pod overhead is much larger than it looks, and shared-core machine types make it worse.** `e2-medium` reports only ~940m allocatable CPU out of its nominal "2 vCPU" (shared-core/burstable machines get trimmed hard by GKE's allocatable calculation), and GKE's own mandatory system DaemonSets/Deployments (kube-dns, kube-proxy, csi-secrets-store, gke-metadata-server, fluentbit, konnectivity, netd, node-local-dns) already consume ~930m of that by themselves. On a single-node cluster this leaves **zero room for any app workload**, confirmed live via every pod stuck `Pending` on "Insufficient cpu" before switching to `e2-standard-2` (dedicated cores, ~1930m allocatable). If sizing a single-node Standard cluster again: budget ~930m CPU as a fixed system floor before counting your own workload's requests, and don't use shared-core (`e2-small`/`e2-medium`) machine types for anything tight — dedicated-core `e2-standard-*` reports much closer to nominal capacity.
+5. **GKE Standard's mandatory system-pod overhead is much larger than it looks, and shared-core machine types make it worse.** `e2-medium` reports only ~940m allocatable CPU out of its nominal "2 vCPU"; GKE's own mandatory system pods already consume ~930m of that by themselves — zero room for app workload. Confirmed live (every pod `Pending` on "Insufficient cpu"). Fix: `e2-standard-2` (dedicated cores, ~1930m allocatable). Budget ~930m CPU as a fixed system floor on any single-node Standard cluster; avoid shared-core (`e2-small`/`e2-medium`) machine types.
 
-6. **Google Managed Prometheus is enabled by default on Standard clusters** (`kube-state-metrics` in `gke-managed-cim` namespace + `gmp-operator`/`collector` in `gmp-system`, ~110m CPU combined) — worth disabling explicitly (`monitoring_config { managed_prometheus { enabled = false } }`) on any resource-constrained cluster where nobody's actually looking at the metrics.
+6. **Google Managed Prometheus is enabled by default on Standard clusters** (~110m CPU) — disable explicitly (`monitoring_config { managed_prometheus { enabled = false } }`) on a resource-constrained cluster nobody's monitoring via Cloud Monitoring dashboards.
 
-7. **`gcloud`'s own client-side operation-wait can time out well before the server-side operation actually finishes** — hit this twice this session: once with `tofu apply` (5-minute Bash tool timeout killed the client mid-`google_container_cluster` update; the GKE API call kept running and completed successfully server-side, confirmed via `gcloud container operations describe <op-id>` showing `DONE`), and once with `gcloud sql instances patch --activation-policy=ALWAYS` inside `wake.sh` (client gave up after its own internal timeout with "taking longer than expected", but the operation itself finished fine, confirmed via `gcloud beta sql operations wait <op-id>`). **Don't assume a timed-out/killed client command means the underlying change failed** — check the operation ID directly before retrying or treating it as an error. A killed `tofu apply` also leaves the GCS state lock stuck (`tofu force-unlock -force <lock-id>` after confirming no `tofu` process is still running).
+7. **`gcloud`/`tofu`'s own client-side operation-wait can time out well before the server-side operation actually finishes.** Hit repeatedly this session (a `tofu apply` killed by a client timeout, a `gcloud sql instances patch` giving up client-side) — in every case the operation had actually succeeded server-side, confirmed via `gcloud container operations describe`/`gcloud beta sql operations wait`. **Don't assume a timed-out client command means the change failed** — check the operation ID directly. A killed `tofu apply` also leaves the GCS state lock stuck (`tofu force-unlock -force <lock-id>` after confirming no `tofu` process is still running).
 
-8. **Cloud SQL's private IP is not stable across recreates.** Confirmed twice this session: `10.80.0.3` → (destroy) → `10.158.0.3`. **Fixed properly this session** — `DB_HOST` now flows through `modules/secrets` (sourced from `module.cloudsql.private_ip_address`) → Secret Manager → Secret Sync → `secretKeyRef` in both `03-deployment-shortliner.yaml` and `03-deployment-shortliner-analytics.yaml`, same pattern as the DB credentials. No more hardcoded literal, no more manual manifest edits after a rebuild.
+8. **Cloud SQL's private IP is not stable across recreates**, and `DB_HOST` used to be hardcoded, breaking on every rebuild. **Fixed**: `DB_HOST` now flows through `modules/secrets` → Secret Manager → Secret Sync → `secretKeyRef`, same pattern as the DB credentials, in each app repo's own `k8s/deployment.yaml`.
 
-9. **`SecretSync` doesn't re-poll just because you added a new secret to its `SecretProviderClass`.** Hit this fixing gotcha #8 above: after adding `SHORTLINER_DB_HOST`/`ANALYTICS_DB_HOST` to the `secrets:` list in `k8s/shortliner/02-secretsync.yaml` and `kubectl apply`-ing, `metadata.generation` on the `SecretSync` object bumped to 2 but `status.observedGeneration` stayed empty for 11+ hours — the new key never appeared in the underlying k8s `Secret`, and pods failed with `couldn't find key ... in Secret`. **Fix**: `kubectl delete secretsync <name> -n shortliner` then `kubectl apply` again to force a fresh `Create` instead of relying on the `Update` path to notice the new secret list. Don't assume `kubectl apply` on a `SecretProviderClass`/`SecretSync` pair will actually re-sync promptly — verify the k8s `Secret`'s actual keys (`kubectl get secret <name> -o jsonpath='{.data}'`) before trusting it, and delete+recreate the `SecretSync` if it doesn't show up.
+9. **`SecretSync` doesn't re-poll just because you added a new secret to its `SecretProviderClass`.** `metadata.generation` bumps but `status.observedGeneration` can stay stale for 11+ hours — the new key never appears in the underlying k8s `Secret`. **Fix**: `kubectl delete secretsync <name> -n shortliner` then `kubectl apply` again to force a fresh `Create`. Verify the k8s `Secret`'s actual keys (`kubectl get secret <name> -o jsonpath='{.data}'`) before trusting a `SecretProviderClass` change took effect.
 
-10. **Cloudflare Tunnel's API token permission is mislabeled in the dashboard.** Search "tun" in the token permission UI → only "Argo Tunnel (Legacy)" appears (old product name), and that IS the correct permission (Account-level, needs Edit). "Connectivity Directory" also mentions tunnels but is a different, newer feature — not sufficient on its own.
+10. **GitHub Actions only discovers workflow files at the literal repo-root `.github/workflows/`, never in a subdirectory.** `promote.yml` lived at `google-cloud-platform/.github/workflows/promote.yml` for a long time — confirmed via the API that this repo had **zero workflow runs in its entire history** until this was fixed. If a workflow ever seems to silently never trigger, check the path first before assuming the trigger config is wrong.
 
-11. **Historical/no-longer-applicable**: the old Autopilot-specific gotchas (fixed 100GiB non-configurable boot disks, "Autopilot node pools cannot be accessed or modified", 3-of-4-nodes being pure system overhead, `SSD_TOTAL_GB` quota pressure from Autopilot's forced disk size) no longer apply now that this project is on Standard mode with direct node-pool/disk control (`30GB pd-balanced` today). Keeping this note in case Autopilot is ever reconsidered — these were real, confirmed GCP behaviors at the time, not mistakes.
+11. **`google-github-actions/setup-gcloud@v2` does not install `gke-gcloud-auth-plugin` by default**, which modern GKE requires for `kubectl` auth. Fails with `exec: executable gke-gcloud-auth-plugin not found` on the first `kubectl apply`/`get` after `gcloud container clusters get-credentials`. Fix: add `with: { install_components: 'gke-gcloud-auth-plugin' }` to the `setup-gcloud` step. Hit this in all 3 app repos' new `deploy` jobs on the first real run — same fix needed anywhere `setup-gcloud` + `kubectl` are combined in a fresh runner.
+
+12. **The `infra_ci` WIF identity's `tofu plan` can show phantom in-place-update diffs** (10 resources — GKE cluster, Cloud SQL instance, an SA key while it still existed, several `google_secret_manager_secret_version`s, `random_password`s — with **zero visible attribute changes**, everything hidden) that the `tofu-bootstrap` key-based identity never sees for the same state. Root cause not fully confirmed — likely a serialization difference between short-lived WIF-issued OAuth tokens and a long-lived key's tokens (e.g. `null` vs `""` on some optional field). **Not dangerous**: confirmed zero adds/destroys/replaces every time, purely in-place. Running `apply` through it once resolves it cleanly and it stays resolved until the next unrelated config change. If `plan` in CI ever shows a bunch of hidden-diff in-place updates with `0 to add, 0 to destroy`, this is almost certainly it — safe to approve.
+
+13. **`gh api ... /pending_deployments` needs `environment_ids` as a JSON integer array**, not `-f environment_ids[]=<id>` (that sends it as a string and 422s). Use `--input -` with a raw JSON body: `{"environment_ids": [123], "state": "approved"}`.
+
+14. **Two separate tool-output prompt-injection attempts were caught this session** while researching via `gh api` and a Bash command against the `shortliner-frontend` repo and general tool output — text formatted to impersonate a Claude Code system reminder, embedded in returned content. Both were correctly identified as non-legitimate and ignored, no action taken on them. Worth periodically auditing `shortliner-frontend` and the general tool chain if this recurs.
+
+15. **Historical/no-longer-applicable**: old Autopilot-specific gotchas (fixed 100GiB boot disks, forced system-node overhead, `SSD_TOTAL_GB` quota pressure) — irrelevant now that this project is on Standard mode. Kept in git history for reference in case Autopilot is ever reconsidered.
 
 ## Known outstanding items
 
-- **WIF migration** (replacing `GCP_SA_KEY` with Workload Identity Federation): explicitly deferred, not started.
-- **`rebuild.sh` pipeline script**: discussed and designed (see Obsidian note) but not built. Three open questions were left for the user before implementing: image tag handling, Makefile vs plain scripts, whether GitHub secrets setup belongs in the same script.
-- **Delete `tofu-bootstrap` SA + key** once the user confirms no more active infra work is planned — don't do this preemptively, it'll break the ability to run `tofu`/`gcloud` for this project.
-- **`opentofu/bootstrap/` is on provider `~> 7.0`** (bumped alongside `gke/` this session) but its own state was never re-applied since it's a one-time, already-satisfied config (`tofu plan` there shows no changes) — nothing to do, just noting it's consistent.
+- **`opentofu/bootstrap/` is on provider `~> 7.0`** but its own state was never re-applied (one-time config, `tofu plan` there shows no changes — nothing to do).
+- **Delete `tofu-bootstrap` SA + key** once confident CI is fully reliable and no more local emergency access is needed — don't do this preemptively, it's still the only fallback if WIF/CI ever breaks.
+- ~~WIF migration~~ — **done this session.**
+- ~~`rebuild.sh` pipeline script~~ — **superseded by `infra.yml`** (the app-repo self-deploy + infra CI pipeline together cover what `rebuild.sh` was designed to do).
 
 ## Common commands
 
 ```bash
-# Always needed first
+# Routine infra changes: just open a PR touching opentofu/gke/** against cloud-infra.
+# infra.yml handles plan (on PR) and apply (on merge to main, behind approval) automatically.
+
+# Routine app deploys: just push to master in the app's own repo. Its own deploy.yml
+# builds, tags, and deploys behind that repo's production environment approval.
+
+# Manual local fallback (ADC is broken for this account, see gotcha #1)
 export GOOGLE_APPLICATION_CREDENTIALS=~/tofu-bootstrap-key.json
 export CLOUDFLARE_API_TOKEN=<token>   # only needed for tofu apply/destroy/plan in gke/
-
-# Apply changes
 cd opentofu/gke && tofu init && tofu apply
 
-# kubectl context (already added, but if missing) — note --zone, not --region (zonal cluster)
+# kubectl context (note --zone, not --region — zonal cluster)
 gcloud container clusters get-credentials shortliner-cluster --zone europe-central2-a --project shortliner-prod
 
-# Sleep/wake (now also resizes the real GKE node pool, not just pods/Cloud SQL)
+# Sleep/wake (resizes the real GKE node pool, not just pods/Cloud SQL)
 ./k8s/scripts/sleep.sh
 ./k8s/scripts/wake.sh
 
-# Destroy & rebuild from scratch
-cd opentofu/gke && tofu destroy   # see gotcha #2 if this hangs on service_networking_connection (create OR delete)
-# then follow the full runbook in the Obsidian note, starting from "Apply the main stack"
-# Cloud SQL's private IP will change but DB_HOST now flows through Secret Sync automatically (gotcha #8) —
-# no manual manifest edit needed. Still need to re-run the Strimzi operator Helm install (out-of-band,
-# see k8s/kafka/README.md), and if you add any NEW key to a SecretProviderClass, remember gotcha #9:
-# delete+recreate the SecretSync object, don't assume `kubectl apply` alone re-syncs it promptly.
+# Destroy the whole stack via CI (requires typed confirmation + separate approval gate)
+gh workflow run infra.yml --repo lukaszsiedlecki/cloud-infra -f confirm=destroy-shortliner-prod
+# then approve (or reject) the pending deployment on the infra-destroy environment
+
+# Destroy locally (fallback only)
+cd opentofu/gke && tofu destroy   # see gotcha #2 if this hangs on service_networking_connection
+# Cloud SQL's private IP will change but DB_HOST flows through Secret Sync automatically (gotcha #8).
+# Still need to re-run the Strimzi operator Helm install (out-of-band, see k8s/kafka/README.md).
 ```
 
 ## Working conventions for this project
 
 - This is a **learning + cost-conscious personal project** — when in doubt, favor the cheaper/simpler option, but always flag the tradeoff rather than silently picking one.
-- **Verify against live GCP/kubectl state before assuming anything from past notes is still true** — this file and the Obsidian note are snapshots, not live status. `tofu state list`, `kubectl get pods -A`, and `gcloud` describe commands are authoritative.
+- **Verify against live GCP/kubectl/GitHub state before assuming anything from past notes is still true** — this file and the Obsidian note are snapshots, not live status. `tofu state list`, `kubectl get pods -A`, `gh run list`, and `gcloud` describe commands are authoritative.
 - Mirror homelab's conventions (namespace `shortliner`, numbered manifest files, security context patterns) except where GKE's constraints genuinely require differing — and flag those differences explicitly rather than silently adjusting.
-- Don't re-ask questions already answered in this file or the Obsidian note (e.g. Kafka broker count, ingress choice, DB tier, GKE Standard vs Autopilot) unless the user explicitly reopens the decision.
+- Don't re-ask questions already answered in this file or the Obsidian note (e.g. Kafka broker count, ingress choice, DB tier, GKE Standard vs Autopilot, manifests-in-app-repos vs cloud-infra, WIF vs SA key) unless the user explicitly reopens the decision.
 - Never fabricate credential values or ask the user to paste real secrets into chat.
+- **Real production changes** (app repo deploy configs, substantive infra changes) go through a PR the user reviews and merges themselves — don't merge your own PRs or push directly to a repo's default branch for anything beyond a trivial, obviously-correct, already-authorized fix. Human approval gates on GitHub Environments (`production`, `infra-destroy`) are for the user to click through, not to be approved on their behalf even when technically possible via `gh api`.
