@@ -26,9 +26,13 @@ kubectl -n "${KAFKA_NAMESPACE}" patch kafkanodepool "${KAFKA_NODE_POOL}" \
   --type merge -p '{"spec":{"replicas":0}}'
 
 echo "Stopping Cloud SQL instance ${CLOUDSQL_INSTANCE}..."
+# --async: same client-side wait-timeout risk as wake.sh's ALWAYS patch (see
+# comment there and CLAUDE.md gotcha #7). Nothing below depends on the stop
+# having actually finished, so there's no follow-up poll needed here.
 gcloud sql instances patch "${CLOUDSQL_INSTANCE}" \
   --project="${PROJECT_ID}" \
   --activation-policy=NEVER \
+  --async \
   --quiet
 
 echo "Resizing GKE node pool ${GKE_NODE_POOL} to 0 nodes..."
