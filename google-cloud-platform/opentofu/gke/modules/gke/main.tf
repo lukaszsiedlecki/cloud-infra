@@ -85,6 +85,39 @@ resource "google_container_cluster" "main" {
   }
 }
 
+# Dedicated node runtime SA. Without this, Standard node pools default to
+# the project's Compute Engine default SA, which carries roles/editor —
+# near-full project control. A container breakout or host compromise can
+# read that SA's token straight off the node's metadata server, so the
+# blast radius of "attacker gets code execution on this node" is normally
+# "attacker owns the GCP project." This SA instead gets only the three
+# roles GKE's own hardening guidance recommends for node-level logging/
+# monitoring — the same telemetry the previous oauth_scopes already limited
+# it to, now backed by IAM instead of an Editor-scoped account.
+resource "google_service_account" "node" {
+  account_id   = "${var.name_prefix}-gke-node"
+  display_name = "GKE node runtime SA for ${var.name_prefix}-cluster"
+  project      = var.project_id
+}
+
+resource "google_project_iam_member" "node_log_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.node.email}"
+}
+
+resource "google_project_iam_member" "node_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.node.email}"
+}
+
+resource "google_project_iam_member" "node_resource_metadata_writer" {
+  project = var.project_id
+  role    = "roles/stackdriver.resourceMetadata.writer"
+  member  = "serviceAccount:${google_service_account.node.email}"
+}
+
 resource "google_container_node_pool" "primary" {
   provider = google-beta
 
@@ -95,8 +128,9 @@ resource "google_container_node_pool" "primary" {
   node_count = var.node_count
 
   node_config {
-    machine_type = var.machine_type
-    spot         = var.spot
+    machine_type    = var.machine_type
+    spot            = var.spot
+    service_account = google_service_account.node.email
 
     disk_size_gb = var.disk_size_gb
     disk_type    = var.disk_type
