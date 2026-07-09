@@ -1,5 +1,5 @@
 output "cluster_name" {
-  value = module.gke_autopilot.cluster_name
+  value = module.gke.cluster_name
 }
 
 output "cloudsql_instance_name" {

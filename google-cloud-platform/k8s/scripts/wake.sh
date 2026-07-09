@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Reverses sleep.sh: restarts Cloud SQL and the Kafka node pool and waits for
-# both to be ready before scaling app Deployments back up, so apps don't
-# crash-loop against a not-yet-available database or broker.
+# Reverses sleep.sh: resizes the real GKE Standard node pool back up first
+# (nothing can schedule without nodes), then restarts Cloud SQL and the
+# Kafka node pool and waits for both to be ready before scaling app
+# Deployments back up, so apps don't crash-loop against a not-yet-available
+# database or broker.
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-shortliner-prod}"
@@ -11,6 +13,22 @@ REPLICAS="${REPLICAS:-1}"
 KAFKA_NAMESPACE="${KAFKA_NAMESPACE:-kafka}"
 KAFKA_NODE_POOL="${KAFKA_NODE_POOL:-dual-role}"
 KAFKA_REPLICAS="${KAFKA_REPLICAS:-1}"
+GKE_CLUSTER="${GKE_CLUSTER:-shortliner-cluster}"
+GKE_ZONE="${GKE_ZONE:-europe-central2-a}"
+GKE_NODE_POOL="${GKE_NODE_POOL:-shortliner-primary-pool}"
+GKE_NODE_COUNT="${GKE_NODE_COUNT:-1}"
+
+echo "Resizing GKE node pool ${GKE_NODE_POOL} to ${GKE_NODE_COUNT} node(s)..."
+gcloud container clusters resize "${GKE_CLUSTER}" \
+  --node-pool="${GKE_NODE_POOL}" \
+  --num-nodes="${GKE_NODE_COUNT}" \
+  --project="${PROJECT_ID}" \
+  --zone="${GKE_ZONE}" \
+  --quiet
+
+echo "Waiting for node(s) to become Ready..."
+kubectl wait --for=condition=Ready node \
+  -l cloud.google.com/gke-nodepool="${GKE_NODE_POOL}" --timeout=300s
 
 echo "Starting Cloud SQL instance ${CLOUDSQL_INSTANCE}..."
 gcloud sql instances patch "${CLOUDSQL_INSTANCE}" \

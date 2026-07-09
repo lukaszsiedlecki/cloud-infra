@@ -10,6 +10,12 @@ variable "region" {
   default     = "europe-central2"
 }
 
+variable "zone" {
+  description = "Zone for the zonal GKE cluster — chosen for GKE's free-tier zonal control plane (one free zonal cluster per billing account), vs. a flat ~$73/mo for a regional control plane"
+  type        = string
+  default     = "europe-central2-a"
+}
+
 variable "name_prefix" {
   description = "Prefix for resource names"
   type        = string

@@ -32,14 +32,17 @@ module "network" {
   region      = var.region
 }
 
-module "gke_autopilot" {
-  source = "./modules/gke-autopilot"
+module "gke" {
+  source = "./modules/gke"
 
   name_prefix       = var.name_prefix
   project_id        = var.project_id
-  region            = var.region
+  zone              = var.zone
   network_self_link = module.network.network_self_link
   subnet_self_link  = module.network.subnet_self_link
+
+  pods_range_name     = module.network.pods_range_name
+  services_range_name = module.network.services_range_name
 }
 
 module "cloudsql" {
@@ -82,7 +85,7 @@ module "secrets" {
 
   project_id             = var.project_id
   project_number         = data.google_project.current.number
-  workload_identity_pool = module.gke_autopilot.workload_identity_pool
+  workload_identity_pool = module.gke.workload_identity_pool
 
   shortliner_db_user               = module.cloudsql.shortliner_db_user
   shortliner_db_password           = module.cloudsql.shortliner_db_password

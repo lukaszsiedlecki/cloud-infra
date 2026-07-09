@@ -9,10 +9,21 @@ resource "google_compute_subnetwork" "main" {
   region        = var.region
   ip_cidr_range = var.subnet_cidr
 
-  # Autopilot manages its own pod/service ranges via secondary ranges it
-  # creates itself when private_ip_google_access isn't otherwise required
-  # for this small a setup; kept simple on purpose.
   private_ip_google_access = true
+
+  # GKE Standard mode (VPC-native) needs explicit secondary ranges for pod
+  # and service IPs — Autopilot managed these invisibly. Sized modestly
+  # since this cluster will never exceed ~2 nodes, not the typical
+  # oversized /14 you'd give a cluster expected to actually scale.
+  secondary_ip_range {
+    range_name    = "${var.name_prefix}-pods"
+    ip_cidr_range = var.pods_cidr
+  }
+
+  secondary_ip_range {
+    range_name    = "${var.name_prefix}-services"
+    ip_cidr_range = var.services_cidr
+  }
 }
 
 # Private Service Access: reserves a peering range and connects it so Cloud
