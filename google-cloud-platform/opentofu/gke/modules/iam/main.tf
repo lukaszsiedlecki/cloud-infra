@@ -58,6 +58,25 @@ resource "google_service_account_iam_member" "github_deployer_wif" {
   member              = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.repository/lukaszsiedlecki/${each.value}"
 }
 
+# --- Cost-control automation: cloud-infra's sleep/wake workflows impersonate
+# github_deployer too (not infra_ci — that stays Owner-scoped and reserved
+# for tofu apply/destroy only). Needs Cloud SQL rights on top of the existing
+# container.developer grant: cloudsql.editor is the minimal built-in role
+# containing cloudsql.instances.update (for --activation-policy patches)
+# without the broader create/delete/IAM-policy surface cloudsql.admin adds.
+
+resource "google_project_iam_member" "github_deployer_cloudsql_editor" {
+  project = var.project_id
+  role    = "roles/cloudsql.editor"
+  member  = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
+resource "google_service_account_iam_member" "github_deployer_wif_cloud_infra" {
+  service_account_id = google_service_account.github_deployer.name
+  role                = "roles/iam.workloadIdentityUser"
+  member              = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.repository/lukaszsiedlecki/cloud-infra"
+}
+
 # --- Infra CI: new identity for tofu plan/apply/destroy, Owner-scoped to
 # match what tofu-bootstrap already does locally. Security boundary is WIF
 # (keyless, repo-scoped) + required-reviewer approval gates in infra.yml, not

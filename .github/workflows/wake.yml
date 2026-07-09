@@ -1,0 +1,38 @@
+name: Wake — shortliner-prod
+
+# Reverses sleep.yml — see k8s/scripts/wake.sh for the exact sequence
+# (node pool up first, then Cloud SQL, then Kafka, then app Deployments,
+# each step waited-on before the next). Same no-approval-gate rationale,
+# same DST-cron caveat, and same gcloud/kubectl client-timeout caveat
+# (google-cloud-platform/CLAUDE.md gotcha #7) as sleep.yml — see there for
+# the full explanation.
+
+on:
+  schedule:
+    - cron: '0 13 * 4-10 *'          # 15:00 CEST, Apr–Oct
+    - cron: '0 14 * 11,12,1,2,3 *'   # 15:00 CET, Nov–Mar
+  workflow_dispatch: {}
+
+concurrency:
+  group: shortliner-prod-sleep-wake
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.GH_DEPLOYER_SA_EMAIL }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+      - run: |
+          gcloud container clusters get-credentials shortliner-cluster \
+            --zone europe-central2-a --project shortliner-prod
+      - run: bash google-cloud-platform/k8s/scripts/wake.sh

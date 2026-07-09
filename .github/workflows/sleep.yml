@@ -1,0 +1,47 @@
+name: Sleep — shortliner-prod
+
+# Scales shortliner-prod down nightly to cut cost — see k8s/scripts/sleep.sh
+# for the exact sequence. No approval gate: workflow_dispatch is triggered
+# by a human (that IS the approval), and the schedule must run unattended
+# to be useful — this differs deliberately from infra.yml's apply/destroy
+# gates, which protect genuinely destructive actions; sleep/wake are
+# routine and fully reversible.
+#
+# Cron is UTC-only with no DST awareness — two entries approximate Poland's
+# CEST/CET split on calendar-month boundaries; actual drift is at most
+# ~1 hour, only in the ~1-week window around each annual DST transition.
+#
+# A gcloud/kubectl step here can time out client-side while the server-side
+# operation still succeeds (see google-cloud-platform/CLAUDE.md gotcha #7) —
+# a red run isn't automatic proof the sleep didn't happen; check live state
+# first.
+
+on:
+  schedule:
+    - cron: '0 21 * 4-10 *'          # 23:00 CEST, Apr–Oct
+    - cron: '0 22 * 11,12,1,2,3 *'   # 23:00 CET, Nov–Mar
+  workflow_dispatch: {}
+
+concurrency:
+  group: shortliner-prod-sleep-wake
+  cancel-in-progress: false
+
+jobs:
+  sleep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.GH_DEPLOYER_SA_EMAIL }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+      - run: |
+          gcloud container clusters get-credentials shortliner-cluster \
+            --zone europe-central2-a --project shortliner-prod
+      - run: bash google-cloud-platform/k8s/scripts/sleep.sh
