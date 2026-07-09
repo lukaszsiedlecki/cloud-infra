@@ -41,3 +41,4 @@ variable "cloudflare_zone" {
 }
 
 # no-op: testing infra.yml plan job
+# no-op: verify CI plan is now clean post-apply
