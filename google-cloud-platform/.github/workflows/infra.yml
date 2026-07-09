@@ -1,0 +1,116 @@
+name: OpenTofu — shortliner-prod
+
+# Replaces the fully-manual local tofu-bootstrap workflow as the primary
+# path for infra changes. tofu-bootstrap stays available as a human-only
+# fallback (see CLAUDE.md gotcha #1 — ADC login is broken for this account).
+#
+# Auth is GitHub OIDC -> GCP Workload Identity Federation, no long-lived
+# keys. plan runs on every PR touching opentofu/gke/, apply runs on push to
+# main behind the existing "production" required-reviewer environment,
+# destroy is workflow_dispatch-only behind a separate "infra-destroy"
+# environment plus a typed confirmation — see modules/iam for the WIF pool/
+# provider/service-account setup this depends on.
+on:
+  pull_request:
+    paths:
+      - 'google-cloud-platform/opentofu/gke/**'
+  push:
+    branches: [main]
+    paths:
+      - 'google-cloud-platform/opentofu/gke/**'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy-shortliner-prod" to confirm DESTROYING the live stack'
+        required: true
+
+env:
+  TF_WORKING_DIR: google-cloud-platform/opentofu/gke
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+jobs:
+  plan:
+    # Defense-in-depth against fork PRs (repo is public) — GitHub already
+    # withholds secrets/OIDC from fork-triggered pull_request runs by
+    # default, this is a second layer, not the primary control. Deliberately
+    # plain pull_request, not pull_request_target (which would run this
+    # privileged workflow against fork-controlled code).
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.7.0"
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.INFRA_CI_SA_EMAIL }}
+      - run: tofu init
+      - run: tofu plan -no-color -input=false
+
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.7.0"
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.INFRA_CI_SA_EMAIL }}
+      - run: tofu init
+      - run: tofu apply -auto-approve -input=false
+
+  verify-confirmation:
+    # Kept as its own ungated job so a typo fails in seconds with zero
+    # reviewer notification, instead of pinging the reviewer for an
+    # approval request that's going to fail anyway.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [ "${{ github.event.inputs.confirm }}" != "destroy-shortliner-prod" ]; then
+            echo "::error::Confirmation text did not match. Aborting before requesting approval."
+            exit 1
+          fi
+
+  destroy:
+    needs: verify-confirmation
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Separate environment from "production" (apply) — a distinct gate name
+    # forces a reviewer to consciously recognize this as a destroy approval.
+    environment: infra-destroy
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.7.0"
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.INFRA_CI_SA_EMAIL }}
+      - run: tofu init
+      - run: tofu destroy -auto-approve -input=false

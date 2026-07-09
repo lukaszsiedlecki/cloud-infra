@@ -59,8 +59,9 @@ module "cloudsql" {
 module "iam" {
   source = "./modules/iam"
 
-  name_prefix = var.name_prefix
-  project_id  = var.project_id
+  name_prefix    = var.name_prefix
+  project_id     = var.project_id
+  project_number = data.google_project.current.number
 }
 
 module "tunnel" {

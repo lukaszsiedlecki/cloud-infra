@@ -33,3 +33,11 @@ output "github_deployer_key_json_base64" {
 output "secret_manager_secret_ids" {
   value = module.secrets.secret_ids
 }
+
+output "infra_ci_email" {
+  value = module.iam.infra_ci_email
+}
+
+output "workload_identity_pool_provider_name" {
+  value = module.iam.workload_identity_pool_provider_name
+}
