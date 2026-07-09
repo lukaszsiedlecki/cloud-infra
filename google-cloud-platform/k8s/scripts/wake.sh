@@ -31,9 +31,16 @@ kubectl wait --for=condition=Ready node \
   -l cloud.google.com/gke-nodepool="${GKE_NODE_POOL}" --timeout=300s
 
 echo "Starting Cloud SQL instance ${CLOUDSQL_INSTANCE}..."
+# --async: gcloud's own synchronous wait for this op has hit its client-side
+# threshold live (~10min) while the real op took ~13min — confirmed via
+# `gcloud beta sql operations wait` that it had actually succeeded server-side
+# (see CLAUDE.md gotcha #7). Returning immediately and letting the RUNNABLE
+# poll loop below own the wait avoids that ceiling entirely instead of just
+# picking a bigger number.
 gcloud sql instances patch "${CLOUDSQL_INSTANCE}" \
   --project="${PROJECT_ID}" \
   --activation-policy=ALWAYS \
+  --async \
   --quiet
 
 echo "Scaling Kafka node pool ${KAFKA_NODE_POOL} in namespace ${KAFKA_NAMESPACE} to ${KAFKA_REPLICAS} replica(s)..."
@@ -45,9 +52,13 @@ until [ "$(gcloud sql instances describe "${CLOUDSQL_INSTANCE}" --project="${PRO
   sleep 5
 done
 
-echo "Waiting for Kafka pods to become Ready (quorum re-forming can take a minute)..."
+echo "Waiting for Kafka pods to become Ready (quorum re-forming can take several minutes)..."
+# 600s, not 300s: confirmed live that entity-operator can cycle through
+# liveness-probe failures (connection refused / 500s) against the
+# not-yet-ready broker for 5+ minutes before settling — 300s cut it off
+# mid-retry even though it was already self-healing.
 kubectl -n "${KAFKA_NAMESPACE}" wait --for=condition=Ready pod \
-  -l strimzi.io/cluster=my-cluster --timeout=300s
+  -l strimzi.io/cluster=my-cluster --timeout=600s
 
 echo "Scaling all Deployments in namespace ${NAMESPACE} to ${REPLICAS} replica(s)..."
 kubectl -n "${NAMESPACE}" scale deployment --all --replicas="${REPLICAS}"
