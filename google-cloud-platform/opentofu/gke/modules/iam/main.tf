@@ -71,6 +71,20 @@ resource "google_project_iam_member" "github_deployer_cloudsql_editor" {
   member  = "serviceAccount:${google_service_account.github_deployer.email}"
 }
 
+# sleep.sh/wake.sh also call `gcloud container clusters resize`, which is a
+# control-plane operation (container.clusters.update) that container.developer
+# does not grant — that role only covers Kubernetes-API-level objects inside
+# the cluster (deployments, pods, services), not the cluster resource itself.
+# Confirmed missing live: the first real CI run of wake.yml failed with
+# PERMISSION_DENIED on the resize call. clusterAdmin adds cluster resource
+# management on top of the existing developer grant, still short of
+# container.admin's broader surface.
+resource "google_project_iam_member" "github_deployer_cluster_admin" {
+  project = var.project_id
+  role    = "roles/container.clusterAdmin"
+  member  = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
 resource "google_service_account_iam_member" "github_deployer_wif_cloud_infra" {
   service_account_id = google_service_account.github_deployer.name
   role                = "roles/iam.workloadIdentityUser"
