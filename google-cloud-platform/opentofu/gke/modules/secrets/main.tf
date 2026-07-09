@@ -5,8 +5,10 @@ locals {
   secrets = {
     SHORTLINER_DB_USER     = { value = var.shortliner_db_user, ksa = "shortliner" }
     SHORTLINER_DB_PASSWORD = { value = var.shortliner_db_password, ksa = "shortliner" }
+    SHORTLINER_DB_HOST     = { value = var.db_host, ksa = "shortliner" }
     ANALYTICS_DB_USER      = { value = var.shortliner_analytics_db_user, ksa = "shortliner-analytics" }
     ANALYTICS_DB_PASSWORD  = { value = var.shortliner_analytics_db_password, ksa = "shortliner-analytics" }
+    ANALYTICS_DB_HOST      = { value = var.db_host, ksa = "shortliner-analytics" }
     TUNNEL_TOKEN           = { value = var.tunnel_token, ksa = "cloudflared" }
   }
 }

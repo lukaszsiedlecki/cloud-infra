@@ -19,6 +19,11 @@ variable "namespace" {
   default     = "shortliner"
 }
 
+variable "db_host" {
+  description = "Cloud SQL private IP address, shared by both shortliner and shortliner-analytics — not stable across instance recreates, so this is sourced from the live Terraform resource instead of a hand-copied literal"
+  type        = string
+}
+
 variable "shortliner_db_user" {
   type = string
 }

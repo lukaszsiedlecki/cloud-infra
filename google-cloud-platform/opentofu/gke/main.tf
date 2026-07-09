@@ -87,6 +87,7 @@ module "secrets" {
   project_number         = data.google_project.current.number
   workload_identity_pool = module.gke.workload_identity_pool
 
+  db_host                           = module.cloudsql.private_ip_address
   shortliner_db_user               = module.cloudsql.shortliner_db_user
   shortliner_db_password           = module.cloudsql.shortliner_db_password
   shortliner_analytics_db_user     = module.cloudsql.shortliner_analytics_db_user
