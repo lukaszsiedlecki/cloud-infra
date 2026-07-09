@@ -44,11 +44,11 @@ jobs:
       run:
         working-directory: ${{ env.TF_WORKING_DIR }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@v5
+      - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: "1.7.0"
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.INFRA_CI_SA_EMAIL }}
@@ -66,11 +66,11 @@ jobs:
       run:
         working-directory: ${{ env.TF_WORKING_DIR }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@v5
+      - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: "1.7.0"
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.INFRA_CI_SA_EMAIL }}
@@ -104,11 +104,11 @@ jobs:
       run:
         working-directory: ${{ env.TF_WORKING_DIR }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@v5
+      - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: "1.7.0"
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.INFRA_CI_SA_EMAIL }}
