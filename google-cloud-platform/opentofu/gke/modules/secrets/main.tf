@@ -24,9 +24,28 @@ resource "google_secret_manager_secret" "main" {
 }
 
 resource "google_secret_manager_secret_version" "main" {
-  for_each    = local.secrets
+  # TUNNEL_TOKEN is handled by its own resource below — the
+  # cloudflare_zero_trust_tunnel_cloudflared_token data source it reads from
+  # isn't idempotent (Cloudflare returns a differently-encoded but
+  # functionally equivalent token on different calls), which would otherwise
+  # make this secret_version want replacement on essentially every plan.
+  for_each    = { for k, v in local.secrets : k => v if k != "TUNNEL_TOKEN" }
   secret      = google_secret_manager_secret.main[each.key].id
   secret_data = each.value.value
+}
+
+resource "google_secret_manager_secret_version" "tunnel_token" {
+  secret      = google_secret_manager_secret.main["TUNNEL_TOKEN"].id
+  secret_data = local.secrets["TUNNEL_TOKEN"].value
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}
+
+moved {
+  from = google_secret_manager_secret_version.main["TUNNEL_TOKEN"]
+  to   = google_secret_manager_secret_version.tunnel_token
 }
 
 # Direct Workload Identity Federation principal binding — no separate Google

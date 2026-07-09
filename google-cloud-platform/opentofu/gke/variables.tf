@@ -39,3 +39,5 @@ variable "cloudflare_zone" {
   type        = string
   default     = "lukaszsiedlecki.com"
 }
+
+# no-op: testing infra.yml plan job
