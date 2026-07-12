@@ -6,7 +6,9 @@ Full narrative history and design rationale (much more verbose than this file) l
 
 ## Current live state (as of 2026-07-09, end of session)
 
-Everything below is **actually deployed and verified working** unless noted otherwise.
+**PAUSED as of 2026-07-12**: the whole stack is intentionally asleep (`sleep.sh` run manually via the Sleep workflow — GKE node pool at 0 nodes, Cloud SQL stopped, all Deployments at 0 replicas) to stop billing on this cost-conscious personal project while it's not being actively used. **Both `wake.yml` and `sleep.yml` are disabled** — schedule triggers commented out in the workflow files, and the workflows themselves disabled repo-side (`gh workflow disable`) as a second layer, so neither the nightly schedule nor an accidental manual dispatch can fire. To resume normal operation: uncomment the `schedule:` blocks in both files, `gh workflow enable "Wake — shortliner-prod"` and `"Sleep — shortliner-prod"`, then run the Wake workflow (or `./k8s/scripts/wake.sh` locally) to actually bring the stack back up — re-enabling the schedule alone does not wake it, it only resumes the nightly toggle going forward.
+
+Everything below reflects the **last actively-running state** (2026-07-09) — nodes/Cloud SQL/pods are currently scaled to zero per the above, not because anything broke.
 
 - GKE **Standard** cluster `shortliner-cluster`, **zonal** in `europe-central2-a`, single-node pool `shortliner-primary-pool` (`e2-standard-2`, Spot, 30GB `pd-balanced`).
 - Cloud SQL `shortliner-pg` (`db-f1-micro`, `PD_HDD`) running with 2 databases. `DB_HOST` flows through Terraform → Secret Manager → Secret Sync automatically — no manual manifest edits needed after any future rebuild.
