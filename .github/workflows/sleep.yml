@@ -16,10 +16,18 @@ name: Sleep — shortliner-prod
 # a red run isn't automatic proof the sleep didn't happen; check live state
 # first.
 
+# PAUSED 2026-07-12: shortliner-prod is intentionally kept fully asleep for
+# now (cost-conscious personal project, not being actively used) — the
+# environment was put to sleep manually and there's nothing left for a nightly
+# sleep run to do. Schedule triggers commented out below; workflow_dispatch
+# is also disabled repo-side (`gh workflow disable`) as a belt-and-suspenders
+# measure so it can't be triggered by accident either.
+# To resume: uncomment the `schedule:` block below, then
+# `gh workflow enable "Sleep — shortliner-prod"` (same for wake.yml).
 on:
-  schedule:
-    - cron: '0 21 * 4-10 *'          # 23:00 CEST, Apr–Oct
-    - cron: '0 22 * 11,12,1,2,3 *'   # 23:00 CET, Nov–Mar
+  # schedule:
+  #   - cron: '0 21 * 4-10 *'          # 23:00 CEST, Apr–Oct
+  #   - cron: '0 22 * 11,12,1,2,3 *'   # 23:00 CET, Nov–Mar
   workflow_dispatch: {}
 
 concurrency:

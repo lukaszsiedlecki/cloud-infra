@@ -7,10 +7,18 @@ name: Wake — shortliner-prod
 # (google-cloud-platform/CLAUDE.md gotcha #7) as sleep.yml — see there for
 # the full explanation.
 
+# PAUSED 2026-07-12: shortliner-prod is intentionally kept fully asleep for
+# now (cost-conscious personal project, not being actively used) — the whole
+# point of the schedule below is to wake it back up daily, which is exactly
+# what we don't want while paused. Schedule triggers commented out below;
+# workflow_dispatch is also disabled repo-side (`gh workflow disable`) as a
+# belt-and-suspenders measure so it can't be triggered by accident either.
+# To resume: uncomment the `schedule:` block below, then
+# `gh workflow enable "Wake — shortliner-prod"` (same for sleep.yml).
 on:
-  schedule:
-    - cron: '0 13 * 4-10 *'          # 15:00 CEST, Apr–Oct
-    - cron: '0 14 * 11,12,1,2,3 *'   # 15:00 CET, Nov–Mar
+  # schedule:
+  #   - cron: '0 13 * 4-10 *'          # 15:00 CEST, Apr–Oct
+  #   - cron: '0 14 * 11,12,1,2,3 *'   # 15:00 CET, Nov–Mar
   workflow_dispatch: {}
 
 concurrency:
